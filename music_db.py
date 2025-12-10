@@ -70,7 +70,7 @@ def load_single_songs(
     try:
         for song_title, genres, artist_name, release_date in single_songs:
             if not genres:
-                bad.add((artist_name, song_title))
+                bad.add((song_title, artist_name))
                 continue
 
             artist_id = _get_or_create_artist(cur, artist_name)
@@ -84,7 +84,7 @@ def load_single_songs(
             )
             row = cur.fetchone()
             if row:
-                bad.add((artist_name, song_title))
+                bad.add((song_title, artist_name))
                 continue
 
             cur.execute(
@@ -115,13 +115,13 @@ def load_single_songs(
 
 def load_albums(
     mydb,
-    albums: List[Tuple[str, str, str, str, List[str]]]
+    albums: List[Tuple[str, str, str, List[str]]]
 ) -> Set[Tuple[str, str]]:
-   
+
     bad: Set[Tuple[str, str]] = set()
     cur = mydb.cursor()
     try:
-        for album_title, artist_name, release_date, album_genre, song_titles in albums:
+        for album_title, artist_name, album_genre, song_titles in albums:
             artist_id = _get_or_create_artist(cur, artist_name)
             genre_id = _get_or_create_genre(cur, album_genre)
 
@@ -157,9 +157,9 @@ def load_albums(
             cur.execute(
                 """
                 INSERT INTO Album (title, artist_id, release_date, genre_id)
-                VALUES (%s, %s, %s, %s)
+                VALUES (%s, %s, NULL, %s)
                 """,
-                (album_title, artist_id, release_date, genre_id),
+                (album_title, artist_id, genre_id),
             )
             album_id = cur.lastrowid
 
@@ -186,6 +186,7 @@ def load_albums(
         cur.close()
 
     return bad
+
 
 
 def load_users(mydb, users: List[str]) -> Set[str]:

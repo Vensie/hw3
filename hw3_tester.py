@@ -53,7 +53,7 @@ def test_load_single_songs_duplicate(mydb):
 
 
 # ---------------------------------------------------------
-# 2) load_albums – 5-tuple format + album rejections
+# 2) load_albums – 4-tuple format + album rejections
 # ---------------------------------------------------------
 
 def test_load_albums_basic_and_duplicates(mydb):
@@ -61,11 +61,11 @@ def test_load_albums_basic_and_duplicates(mydb):
 
     clear_database(mydb)
 
-    # Album tuple format:
-    # (album_title, artist_name, release_date, album_genre, [song titles])
+    # Album tuple format (per spec!):
+    # (album_title, artist_name, album_genre, [song titles])
 
     albums1 = [
-        ("Album One", "Artist A", "2020-05-01", "Rock", ["Track 1", "Track 2"]),
+        ("Album One", "Artist A", "Rock", ["Track 1", "Track 2"]),
     ]
     bad1 = load_albums(mydb, albums1)
     print("First load bad set:", bad1)
@@ -73,7 +73,7 @@ def test_load_albums_basic_and_duplicates(mydb):
 
     # Duplicate album: same (artist, title)
     albums2 = [
-        ("Album One", "Artist A", "2021-01-01", "Rock", ["Other 1"]),
+        ("Album One", "Artist A", "Rock", ["Other 1"]),
     ]
     bad2 = load_albums(mydb, albums2)
     print("Second load bad set:", bad2)
@@ -98,7 +98,7 @@ def test_load_albums_song_duplicates(mydb):
 
     # 2) Try to load an album for Artist A that includes "Hit"
     albums = [
-        ("Problem Album", "Artist A", "2021-01-01", "Rock", ["Hit", "Other"]),
+        ("Problem Album", "Artist A", "Rock", ["Hit", "Other"]),
     ]
     bad_albums = load_albums(mydb, albums)
     print("Album with duplicate song bad set:", bad_albums)
@@ -120,14 +120,14 @@ def test_load_albums_song_duplicates_between_albums(mydb):
 
     # First album for Artist B, with song "Shared"
     albums1 = [
-        ("First Album", "Artist B", "2020-01-01", "Jazz", ["Shared", "Unique 1"]),
+        ("First Album", "Artist B", "Jazz", ["Shared", "Unique 1"]),
     ]
     bad1 = load_albums(mydb, albums1)
     assert bad1 == set()
 
     # Second album for Artist B, also containing "Shared" -> should be rejected
     albums2 = [
-        ("Second Album", "Artist B", "2021-01-01", "Jazz", ["Shared", "Unique 2"]),
+        ("Second Album", "Artist B", "Jazz", ["Shared", "Unique 2"]),
     ]
     bad2 = load_albums(mydb, albums2)
     print("Second album bad set:", bad2)
@@ -135,8 +135,7 @@ def test_load_albums_song_duplicates_between_albums(mydb):
     expected = {("Artist B", "Second Album")}
     print("Expected rejects:", expected)
     assert bad2 == expected, (
-        "Second album with duplicate song title by same artist "
-        "should be rejected"
+        "Second album with duplicate song title by same artist should be rejected"
     )
 
     print("✅ load_albums cross-album song-duplicate test passed.")
@@ -158,7 +157,7 @@ def test_load_song_ratings(mydb):
     load_single_songs(mydb, singles)
 
     albums = [
-        ("Album One", "Artist A", "2020-02-01", "Rock", ["Track 1"]),
+        ("Album One", "Artist A", "Rock", ["Track 1"]),
     ]
     load_albums(mydb, albums)
 
@@ -229,10 +228,10 @@ def setup_for_query_tests(mydb):
     ]
     load_single_songs(mydb, singles)
 
-    # Albums
+    # Albums (4-tuple: title, artist, album_genre, [songs])
     albums = [
-        ("Rock Album", "Artist A", "2020-04-01", "Rock", ["Album Rock 1", "Album Rock 2"]),
-        ("Jazz Album", "Artist C", "2021-05-01", "Jazz", ["Album Jazz 1"]),
+        ("Rock Album", "Artist A", "Rock", ["Album Rock 1", "Album Rock 2"]),
+        ("Jazz Album", "Artist C", "Jazz", ["Album Jazz 1"]),
     ]
     load_albums(mydb, albums)
 
@@ -270,7 +269,6 @@ def test_get_top_song_genres(mydb):
     res = get_top_song_genres(mydb, 10)
     print("get_top_song_genres(10) =", res)
 
-    # Rough expectations:
     # Songs & their genres:
     # Rock Single (Rock)
     # Pop Single (Pop)
@@ -298,9 +296,9 @@ def test_album_and_single_artists(mydb):
     print("get_album_and_single_artists() =", res)
 
     # In setup_for_query_tests:
-    # Artist A: has singles + album tracks  -> should appear
+    # Artist A: singles + album tracks  -> should appear
     # Artist B: only single
-    # Artist C: single + album tracks       -> should appear
+    # Artist C: single + album tracks   -> should appear
     assert "Artist A" in res
     assert "Artist C" in res
     assert "Artist B" not in res
