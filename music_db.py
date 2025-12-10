@@ -6,10 +6,9 @@ def get_connection():
         host="127.0.0.1",
         port=3306,
         user="root",
-        password="pass",
+        password="!Poseidon123",
         database="sab541_music_db",
     )
-
 
 
 def _get_or_create_artist(cur, name: str) -> int:
@@ -30,13 +29,11 @@ def _get_or_create_genre(cur, name: str) -> int:
     return cur.lastrowid
 
 
-def _get_or_create_user(cur, username: str) -> int:
+def _get_user_id(cur, username: str):
+    """Return user_id if user exists, else None."""
     cur.execute("SELECT user_id FROM `User` WHERE username = %s", (username,))
     row = cur.fetchone()
-    if row:
-        return row[0]
-    cur.execute("INSERT INTO `User` (username) VALUES (%s)", (username,))
-    return cur.lastrowid
+    return row[0] if row else None
 
 
 def _get_song_id(cur, title: str, artist_name: str):
@@ -51,11 +48,11 @@ def _get_song_id(cur, title: str, artist_name: str):
     return row[0] if row else None
 
 
+# -----------------------------
+# Required functions
+# -----------------------------
+
 def clear_database(mydb) -> None:
-    """
-    Delete all rows from all tables in the database.
-    Autograder will call this first.
-    """
     cur = mydb.cursor()
     try:
         cur.execute("SET FOREIGN_KEY_CHECKS = 0")
@@ -71,12 +68,20 @@ def load_single_songs(
     mydb,
     single_songs: List[Tuple[str, Tuple[str, ...], str, str]]
 ) -> Set[Tuple[str, str]]:
+
     bad: Set[Tuple[str, str]] = set()
     cur = mydb.cursor()
     try:
         for song_title, genres, artist_name, release_date in single_songs:
+            # Enforce: each song must have at least one genre
+            if not genres:
+                bad.add((artist_name, song_title))
+                continue
+
+            # get/create artist
             artist_id = _get_or_create_artist(cur, artist_name)
 
+            # check if this (artist, title) already exists
             cur.execute(
                 """
                 SELECT song_id FROM Song
@@ -86,9 +91,11 @@ def load_single_songs(
             )
             row = cur.fetchone()
             if row:
+                # Duplicate according to the schema rule
                 bad.add((artist_name, song_title))
                 continue
 
+            # Insert song as a single
             cur.execute(
                 """
                 INSERT INTO Song (title, artist_id, album_id, single_release_date)
@@ -98,8 +105,10 @@ def load_single_songs(
             )
             song_id = cur.lastrowid
 
+            # Attach genres
             for g in genres:
                 genre_id = _get_or_create_genre(cur, g)
+                # avoid duplicate (song_id, genre_id)
                 cur.execute(
                     """
                     INSERT IGNORE INTO SongGenre (song_id, genre_id)
@@ -117,15 +126,17 @@ def load_single_songs(
 
 def load_albums(
     mydb,
-    albums: List[Tuple[str, str, str, List[str]]]
+    albums: List[Tuple[str, str, str, str, List[str]]]
 ) -> Set[Tuple[str, str]]:
+   
     bad: Set[Tuple[str, str]] = set()
     cur = mydb.cursor()
     try:
-        for album_title, artist_name, album_genre, song_titles in albums:
+        for album_title, artist_name, release_date, album_genre, song_titles in albums:
             artist_id = _get_or_create_artist(cur, artist_name)
             genre_id = _get_or_create_genre(cur, album_genre)
 
+            # 1) Check for duplicate album for that artist
             cur.execute(
                 """
                 SELECT album_id FROM Album
@@ -135,18 +146,12 @@ def load_albums(
             )
             row = cur.fetchone()
             if row:
+                # Album already exists -> reject entire album
                 bad.add((artist_name, album_title))
-                album_id = row[0]
-            else:
-                cur.execute(
-                    """
-                    INSERT INTO Album (title, artist_id, release_date, genre_id)
-                    VALUES (%s, %s, NULL, %s)
-                    """,
-                    (album_title, artist_id, genre_id),
-                )
-                album_id = cur.lastrowid
+                continue
 
+            # 2) Check if ANY song in this album would duplicate an existing song
+            duplicate_song_found = False
             for song_title in song_titles:
                 cur.execute(
                     """
@@ -155,11 +160,25 @@ def load_albums(
                     """,
                     (song_title, artist_id),
                 )
-                row = cur.fetchone()
-                if row:
-                    bad.add((artist_name, song_title))
-                    continue
+                if cur.fetchone():
+                    duplicate_song_found = True
+                    break
 
+            if duplicate_song_found:
+                bad.add((artist_name, album_title))
+                continue
+
+            # 3) Album is valid: insert album and all its songs
+            cur.execute(
+                """
+                INSERT INTO Album (title, artist_id, release_date, genre_id)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (album_title, artist_id, release_date, genre_id),
+            )
+            album_id = cur.lastrowid
+
+            for song_title in song_titles:
                 cur.execute(
                     """
                     INSERT INTO Song (title, artist_id, album_id, single_release_date)
@@ -185,6 +204,7 @@ def load_albums(
 
 
 def load_users(mydb, users: List[str]) -> Set[str]:
+
     bad: Set[str] = set()
     cur = mydb.cursor()
     try:
@@ -209,22 +229,31 @@ def load_song_ratings(
     mydb,
     song_ratings: List[Tuple[str, Tuple[str, str], int, str]]
 ) -> Set[Tuple[str, str, str]]:
+
     bad: Set[Tuple[str, str, str]] = set()
     cur = mydb.cursor()
     try:
         for username, (song_title, artist_name), rating_value, rating_date in song_ratings:
-            # Check rating value
+            key = (username, song_title, artist_name)
+
+            # 1) Check rating value
             if rating_value < 1 or rating_value > 5:
-                bad.add((username, song_title, artist_name))
+                bad.add(key)
                 continue
 
-            user_id = _get_or_create_user(cur, username)
+            # 2) User must already exist
+            user_id = _get_user_id(cur, username)
+            if user_id is None:
+                bad.add(key)
+                continue
 
+            # 3) Song must already exist
             song_id = _get_song_id(cur, song_title, artist_name)
             if song_id is None:
-                bad.add((username, song_title, artist_name))
+                bad.add(key)
                 continue
 
+            # 4) Rating must not already exist for (user, song)
             cur.execute(
                 """
                 SELECT rating_id FROM Rating
@@ -232,11 +261,11 @@ def load_song_ratings(
                 """,
                 (user_id, song_id),
             )
-            row = cur.fetchone()
-            if row:
-                bad.add((username, song_title, artist_name))
+            if cur.fetchone():
+                bad.add(key)
                 continue
 
+            # 5) Insert rating
             cur.execute(
                 """
                 INSERT INTO Rating (user_id, song_id, rating_value, rating_date)
@@ -251,11 +280,17 @@ def load_song_ratings(
 
     return bad
 
+
+# -----------------------------
+# Query functions
+# -----------------------------
+
 def get_most_prolific_individual_artists(
     mydb,
     n: int,
     year_range: Tuple[int, int]
 ) -> List[Tuple[str, int]]:
+  
     start_year, end_year = year_range
     cur = mydb.cursor()
     try:
@@ -285,6 +320,7 @@ def get_most_prolific_individual_artists(
 
 
 def get_artists_last_single_in_year(mydb, year: int) -> Set[str]:
+
     cur = mydb.cursor()
     try:
         sql = """
@@ -308,6 +344,7 @@ def get_top_song_genres(
     mydb,
     n: int
 ) -> List[Tuple[str, int]]:
+  
     cur = mydb.cursor()
     try:
         sql = """
@@ -327,6 +364,7 @@ def get_top_song_genres(
 
 
 def get_album_and_single_artists(mydb) -> Set[str]:
+
     cur = mydb.cursor()
     try:
         sql = """
@@ -351,6 +389,7 @@ def get_most_rated_songs(
     year_range: Tuple[int, int],
     n: int
 ) -> List[Tuple[str, str, int]]:
+  
     start_year, end_year = year_range
     cur = mydb.cursor()
     try:
@@ -378,6 +417,7 @@ def get_most_engaged_users(
     year_range: Tuple[int, int],
     n: int
 ) -> List[Tuple[str, int]]:
+  
     start_year, end_year = year_range
     cur = mydb.cursor()
     try:
@@ -396,40 +436,3 @@ def get_most_engaged_users(
         return [(username, int(cnt)) for (username, cnt) in rows]
     finally:
         cur.close()
-
-if __name__ == "__main__":
-    mydb = get_connection()
-
-    print("Clearing DB...")
-    clear_database(mydb)
-
-    singles = [
-        ("Single X", ("Rock",), "Artist A", "2020-05-01"),
-        ("Single Y", ("Pop", "Dance"), "Artist B", "2021-08-11")
-    ]
-    print("Bad singles:", load_single_songs(mydb, singles))
-
-    albums = [
-        ("Album One", "Artist A", "Rock", ["Track 1", "Track 2"]),
-        ("Album Two", "Artist C", "Jazz", ["Blue Note", "Skyline"])
-    ]
-    print("Bad albums:", load_albums(mydb, albums))
-
-    users = ["alice", "bob", "carol"]
-    print("Bad users:", load_users(mydb, users))
-
-    ratings = [
-        ("alice", ("Single X", "Artist A"), 5, "2021-04-04"),
-        ("bob", ("Track 1", "Artist A"), 4, "2022-01-01"),
-        ("carol", ("Single Y", "Artist B"), 3, "2023-03-03")
-    ]
-    print("Bad ratings:", load_song_ratings(mydb, ratings))
-
-    print("Most prolific:", get_most_prolific_individual_artists(mydb, 5, (2019, 2023)))
-    print("Last singles in 2020:", get_artists_last_single_in_year(mydb, 2020))
-    print("Top genres:", get_top_song_genres(mydb, 5))
-    print("Album+single artists:", get_album_and_single_artists(mydb))
-    print("Most rated songs:", get_most_rated_songs(mydb, (2020, 2024), 5))
-    print("Most engaged users:", get_most_engaged_users(mydb, (2020, 2024), 5))
-
-    mydb.close()
