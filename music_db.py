@@ -1,12 +1,16 @@
-# music_db.py
-
 from typing import List, Tuple, Set
-import mysql.connector  # or your DB-API driver
+import mysql.connector  
+
+def get_connection():
+    return mysql.connector.connect(
+        host="127.0.0.1",
+        port=3306,
+        user="root",
+        password="pass",
+        database="sab541_music_db",
+    )
 
 
-# -----------------------------
-# Internal helper functions
-# -----------------------------
 
 def _get_or_create_artist(cur, name: str) -> int:
     cur.execute("SELECT artist_id FROM Artist WHERE name = %s", (name,))
@@ -36,10 +40,6 @@ def _get_or_create_user(cur, username: str) -> int:
 
 
 def _get_song_id(cur, title: str, artist_name: str):
-    """
-    Find a song_id from (song title, artist name).
-    Returns song_id or None if not found.
-    """
     sql = """
         SELECT s.song_id
         FROM Song s
@@ -50,10 +50,6 @@ def _get_song_id(cur, title: str, artist_name: str):
     row = cur.fetchone()
     return row[0] if row else None
 
-
-# -----------------------------
-# Required functions
-# -----------------------------
 
 def clear_database(mydb) -> None:
     """
@@ -75,24 +71,12 @@ def load_single_songs(
     mydb,
     single_songs: List[Tuple[str, Tuple[str, ...], str, str]]
 ) -> Set[Tuple[str, str]]:
-    """
-    Load single (non-album) songs.
-
-    each element of single_songs is:
-        (song_title, (genre1, genre2, ...), artist_name, release_date_str)
-
-    Returns:
-        set of (artist_name, song_title) that could NOT be loaded
-        (e.g., duplicate song for that artist).
-    """
     bad: Set[Tuple[str, str]] = set()
     cur = mydb.cursor()
     try:
         for song_title, genres, artist_name, release_date in single_songs:
-            # get/create artist
             artist_id = _get_or_create_artist(cur, artist_name)
 
-            # check if this (artist, title) already exists
             cur.execute(
                 """
                 SELECT song_id FROM Song
@@ -102,11 +86,9 @@ def load_single_songs(
             )
             row = cur.fetchone()
             if row:
-                # Duplicate according to the schema rule
                 bad.add((artist_name, song_title))
                 continue
 
-            # Insert song as a single
             cur.execute(
                 """
                 INSERT INTO Song (title, artist_id, album_id, single_release_date)
@@ -116,10 +98,8 @@ def load_single_songs(
             )
             song_id = cur.lastrowid
 
-            # Attach genres
             for g in genres:
                 genre_id = _get_or_create_genre(cur, g)
-                # avoid duplicate (song_id, genre_id)
                 cur.execute(
                     """
                     INSERT IGNORE INTO SongGenre (song_id, genre_id)
@@ -139,15 +119,6 @@ def load_albums(
     mydb,
     albums: List[Tuple[str, str, str, List[str]]]
 ) -> Set[Tuple[str, str]]:
-    """
-    Load albums and their songs.
-
-    each element of albums is:
-        (album_title, artist_name, album_genre, [song_title_1, song_title_2, ...])
-
-    Returns:
-        set of (artist_name, album_title) that could NOT be loaded (e.g., duplicate album).
-    """
     bad: Set[Tuple[str, str]] = set()
     cur = mydb.cursor()
     try:
@@ -155,7 +126,6 @@ def load_albums(
             artist_id = _get_or_create_artist(cur, artist_name)
             genre_id = _get_or_create_genre(cur, album_genre)
 
-            # Check for duplicate album for that artist
             cur.execute(
                 """
                 SELECT album_id FROM Album
@@ -165,11 +135,9 @@ def load_albums(
             )
             row = cur.fetchone()
             if row:
-                # Album already exists
                 bad.add((artist_name, album_title))
                 album_id = row[0]
             else:
-                # Create album (release_date can be NULL or set elsewhere)
                 cur.execute(
                     """
                     INSERT INTO Album (title, artist_id, release_date, genre_id)
@@ -179,9 +147,7 @@ def load_albums(
                 )
                 album_id = cur.lastrowid
 
-            # Create songs for this album
             for song_title in song_titles:
-                # check if a song with same artist+title already exists
                 cur.execute(
                     """
                     SELECT song_id FROM Song
@@ -191,7 +157,6 @@ def load_albums(
                 )
                 row = cur.fetchone()
                 if row:
-                    # duplicate song title for this artist; skip, but record as bad
                     bad.add((artist_name, song_title))
                     continue
 
@@ -204,7 +169,6 @@ def load_albums(
                 )
                 song_id = cur.lastrowid
 
-                # assign the album's genre to each song
                 cur.execute(
                     """
                     INSERT IGNORE INTO SongGenre (song_id, genre_id)
@@ -221,12 +185,6 @@ def load_albums(
 
 
 def load_users(mydb, users: List[str]) -> Set[str]:
-    """
-    Load users by username.
-
-    Returns:
-        set of usernames that could NOT be inserted (e.g., duplicates).
-    """
     bad: Set[str] = set()
     cur = mydb.cursor()
     try:
@@ -251,18 +209,6 @@ def load_song_ratings(
     mydb,
     song_ratings: List[Tuple[str, Tuple[str, str], int, str]]
 ) -> Set[Tuple[str, str, str]]:
-    """
-    Load song ratings.
-
-    each element of song_ratings is:
-        (username, (song_title, artist_name), rating_value, rating_date_str)
-
-    Rating_value must be in [1..5].
-
-    Returns:
-        set of (username, song_title, artist_name) that could NOT be inserted
-        (e.g., song/user missing or duplicate rating).
-    """
     bad: Set[Tuple[str, str, str]] = set()
     cur = mydb.cursor()
     try:
@@ -272,16 +218,13 @@ def load_song_ratings(
                 bad.add((username, song_title, artist_name))
                 continue
 
-            # Ensure user exists
             user_id = _get_or_create_user(cur, username)
 
-            # Find song
             song_id = _get_song_id(cur, song_title, artist_name)
             if song_id is None:
                 bad.add((username, song_title, artist_name))
                 continue
 
-            # Check for existing rating from this user for this song
             cur.execute(
                 """
                 SELECT rating_id FROM Rating
@@ -308,23 +251,11 @@ def load_song_ratings(
 
     return bad
 
-
-# -----------------------------
-# Query functions
-# -----------------------------
-
 def get_most_prolific_individual_artists(
     mydb,
     n: int,
     year_range: Tuple[int, int]
 ) -> List[Tuple[str, int]]:
-    """
-    Return top-n artists by number of songs released in the given [start_year, end_year].
-
-    We count each song once. Release year is taken as:
-        - YEAR(single_release_date) for singles
-        - YEAR(Album.release_date) for album tracks (if non-NULL)
-    """
     start_year, end_year = year_range
     cur = mydb.cursor()
     try:
@@ -354,9 +285,6 @@ def get_most_prolific_individual_artists(
 
 
 def get_artists_last_single_in_year(mydb, year: int) -> Set[str]:
-    """
-    Return the set of artist names whose LAST single (by date) falls in the given year.
-    """
     cur = mydb.cursor()
     try:
         sql = """
@@ -380,9 +308,6 @@ def get_top_song_genres(
     mydb,
     n: int
 ) -> List[Tuple[str, int]]:
-    """
-    Return the top-n genres by number of songs (a song counted once per genre).
-    """
     cur = mydb.cursor()
     try:
         sql = """
@@ -402,11 +327,6 @@ def get_top_song_genres(
 
 
 def get_album_and_single_artists(mydb) -> Set[str]:
-    """
-    Return the set of artist names who have BOTH:
-        - at least one album track
-        - at least one single
-    """
     cur = mydb.cursor()
     try:
         sql = """
@@ -431,13 +351,6 @@ def get_most_rated_songs(
     year_range: Tuple[int, int],
     n: int
 ) -> List[Tuple[str, str, int]]:
-    """
-    Return the top-n songs by number of ratings in a given rating_date year range.
-
-    Returns:
-        list of (song_title, artist_name, rating_count)
-        ordered by count DESC, then title ASC, then artist_name ASC.
-    """
     start_year, end_year = year_range
     cur = mydb.cursor()
     try:
@@ -465,13 +378,6 @@ def get_most_engaged_users(
     year_range: Tuple[int, int],
     n: int
 ) -> List[Tuple[str, int]]:
-    """
-    Return the top-n users by number of ratings they made in the given year range.
-
-    Returns:
-        list of (username, rating_count)
-        ordered by count DESC, then username ASC.
-    """
     start_year, end_year = year_range
     cur = mydb.cursor()
     try:
@@ -490,3 +396,40 @@ def get_most_engaged_users(
         return [(username, int(cnt)) for (username, cnt) in rows]
     finally:
         cur.close()
+
+if __name__ == "__main__":
+    mydb = get_connection()
+
+    print("Clearing DB...")
+    clear_database(mydb)
+
+    singles = [
+        ("Single X", ("Rock",), "Artist A", "2020-05-01"),
+        ("Single Y", ("Pop", "Dance"), "Artist B", "2021-08-11")
+    ]
+    print("Bad singles:", load_single_songs(mydb, singles))
+
+    albums = [
+        ("Album One", "Artist A", "Rock", ["Track 1", "Track 2"]),
+        ("Album Two", "Artist C", "Jazz", ["Blue Note", "Skyline"])
+    ]
+    print("Bad albums:", load_albums(mydb, albums))
+
+    users = ["alice", "bob", "carol"]
+    print("Bad users:", load_users(mydb, users))
+
+    ratings = [
+        ("alice", ("Single X", "Artist A"), 5, "2021-04-04"),
+        ("bob", ("Track 1", "Artist A"), 4, "2022-01-01"),
+        ("carol", ("Single Y", "Artist B"), 3, "2023-03-03")
+    ]
+    print("Bad ratings:", load_song_ratings(mydb, ratings))
+
+    print("Most prolific:", get_most_prolific_individual_artists(mydb, 5, (2019, 2023)))
+    print("Last singles in 2020:", get_artists_last_single_in_year(mydb, 2020))
+    print("Top genres:", get_top_song_genres(mydb, 5))
+    print("Album+single artists:", get_album_and_single_artists(mydb))
+    print("Most rated songs:", get_most_rated_songs(mydb, (2020, 2024), 5))
+    print("Most engaged users:", get_most_engaged_users(mydb, (2020, 2024), 5))
+
+    mydb.close()

@@ -1,6 +1,6 @@
 
-CREATE DATABASE IF NOT EXISTS sab541_music_db;
-USE sab541_music_db;
+---CREATE DATABASE IF NOT EXISTS sab541_music_db;
+---USE sab541_music_db;
 
 SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS Rating;
@@ -72,7 +72,6 @@ CREATE TABLE Song (
         ON UPDATE CASCADE
 ) ;
 
--- SongGenre: many-to-many between Song and Genre
 CREATE TABLE SongGenre (
     song_id  INT UNSIGNED NOT NULL,
     genre_id SMALLINT UNSIGNED NOT NULL,
@@ -92,7 +91,6 @@ CREATE TABLE SongGenre (
         ON UPDATE CASCADE
 ) ;
 
--- Rating: one rating per (user, song)
 CREATE TABLE Rating (
     rating_id    BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id      INT UNSIGNED NOT NULL,
