@@ -6,7 +6,7 @@ def get_connection():
         host="127.0.0.1",
         port=3306,
         user="root",
-        password="!Poseidon123",
+        password="pass",
         database="sab541_music_db",
     )
 
@@ -48,10 +48,6 @@ def _get_song_id(cur, title: str, artist_name: str):
     return row[0] if row else None
 
 
-# -----------------------------
-# Required functions
-# -----------------------------
-
 def clear_database(mydb) -> None:
     cur = mydb.cursor()
     try:
@@ -73,15 +69,12 @@ def load_single_songs(
     cur = mydb.cursor()
     try:
         for song_title, genres, artist_name, release_date in single_songs:
-            # Enforce: each song must have at least one genre
             if not genres:
                 bad.add((artist_name, song_title))
                 continue
 
-            # get/create artist
             artist_id = _get_or_create_artist(cur, artist_name)
 
-            # check if this (artist, title) already exists
             cur.execute(
                 """
                 SELECT song_id FROM Song
@@ -91,11 +84,9 @@ def load_single_songs(
             )
             row = cur.fetchone()
             if row:
-                # Duplicate according to the schema rule
                 bad.add((artist_name, song_title))
                 continue
 
-            # Insert song as a single
             cur.execute(
                 """
                 INSERT INTO Song (title, artist_id, album_id, single_release_date)
@@ -105,10 +96,8 @@ def load_single_songs(
             )
             song_id = cur.lastrowid
 
-            # Attach genres
             for g in genres:
                 genre_id = _get_or_create_genre(cur, g)
-                # avoid duplicate (song_id, genre_id)
                 cur.execute(
                     """
                     INSERT IGNORE INTO SongGenre (song_id, genre_id)
@@ -136,7 +125,6 @@ def load_albums(
             artist_id = _get_or_create_artist(cur, artist_name)
             genre_id = _get_or_create_genre(cur, album_genre)
 
-            # 1) Check for duplicate album for that artist
             cur.execute(
                 """
                 SELECT album_id FROM Album
@@ -146,11 +134,9 @@ def load_albums(
             )
             row = cur.fetchone()
             if row:
-                # Album already exists -> reject entire album
                 bad.add((artist_name, album_title))
                 continue
 
-            # 2) Check if ANY song in this album would duplicate an existing song
             duplicate_song_found = False
             for song_title in song_titles:
                 cur.execute(
@@ -168,7 +154,6 @@ def load_albums(
                 bad.add((artist_name, album_title))
                 continue
 
-            # 3) Album is valid: insert album and all its songs
             cur.execute(
                 """
                 INSERT INTO Album (title, artist_id, release_date, genre_id)
@@ -236,24 +221,20 @@ def load_song_ratings(
         for username, (song_title, artist_name), rating_value, rating_date in song_ratings:
             key = (username, song_title, artist_name)
 
-            # 1) Check rating value
             if rating_value < 1 or rating_value > 5:
                 bad.add(key)
                 continue
 
-            # 2) User must already exist
             user_id = _get_user_id(cur, username)
             if user_id is None:
                 bad.add(key)
                 continue
 
-            # 3) Song must already exist
             song_id = _get_song_id(cur, song_title, artist_name)
             if song_id is None:
                 bad.add(key)
                 continue
 
-            # 4) Rating must not already exist for (user, song)
             cur.execute(
                 """
                 SELECT rating_id FROM Rating
@@ -265,7 +246,6 @@ def load_song_ratings(
                 bad.add(key)
                 continue
 
-            # 5) Insert rating
             cur.execute(
                 """
                 INSERT INTO Rating (user_id, song_id, rating_value, rating_date)
@@ -279,11 +259,6 @@ def load_song_ratings(
         cur.close()
 
     return bad
-
-
-# -----------------------------
-# Query functions
-# -----------------------------
 
 def get_most_prolific_individual_artists(
     mydb,
